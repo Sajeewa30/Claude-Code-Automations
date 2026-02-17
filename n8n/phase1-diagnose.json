@@ -12,7 +12,7 @@
     {
       "parameters": {
         "method": "POST",
-        "url": "=https://googleads.googleapis.com/v18/customers/{{ $json.customerId }}/googleAds:searchStream",
+        "url": "=https://googleads.googleapis.com/v23/customers/{{ $json.customerId }}/googleAds:searchStream",
         "authentication": "predefinedCredentialType",
         "nodeCredentialType": "googleAdsOAuth2Api",
         "sendHeaders": true,
@@ -35,7 +35,7 @@
     {
       "parameters": {
         "method": "POST",
-        "url": "=https://googleads.googleapis.com/v18/customers/{{ $json.customerId }}/googleAds:searchStream",
+        "url": "=https://googleads.googleapis.com/v23/customers/{{ $json.customerId }}/googleAds:searchStream",
         "authentication": "predefinedCredentialType",
         "nodeCredentialType": "googleAdsOAuth2Api",
         "sendHeaders": true,

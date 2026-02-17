@@ -15,7 +15,7 @@ import {
 } from "./queries.js";
 
 const TOKEN_URL = "https://oauth2.googleapis.com/token";
-const ADS_API_BASE = "https://googleads.googleapis.com/v18";
+const ADS_API_BASE = "https://googleads.googleapis.com/v23";
 
 let cachedToken: { token: string; expiresAt: number } | null = null;
 
