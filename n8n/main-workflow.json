@@ -1,0 +1,171 @@
+{
+  "name": "Ad Relevance SOP - Main Orchestrator",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [{ "field": "weeks", "weekday": 1, "hour": 9 }]
+        }
+      },
+      "id": "schedule-trigger",
+      "name": "Weekly Schedule",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [0, -100],
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "ad-relevance-sop",
+        "responseMode": "lastNode"
+      },
+      "id": "webhook-trigger",
+      "name": "Webhook Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [0, 100]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Set configuration from trigger input\nconst input = $input.first().json;\n\nreturn [{\n  json: {\n    customerId: input.customerId || process.env.GOOGLE_ADS_CUSTOMER_ID || '',\n    loginCustomerId: input.loginCustomerId || process.env.GOOGLE_ADS_LOGIN_CUSTOMER_ID || '',\n    developerToken: process.env.GOOGLE_ADS_DEVELOPER_TOKEN || '',\n    dateRange: input.dateRange || 'LAST_30_DAYS',\n    campaignFilter: input.campaignIds || 'all'\n  }\n}];"
+      },
+      "id": "set-config",
+      "name": "Set Config",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [250, 0]
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "mode": "list",
+          "value": ""
+        },
+        "options": {}
+      },
+      "id": "phase1",
+      "name": "Phase 1: Diagnose",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [500, 0],
+      "notes": "Import phase1-diagnose.json as a separate workflow and link its ID here"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ $json.needsSplit }}",
+              "value2": true
+            }
+          ]
+        }
+      },
+      "id": "needs-split",
+      "name": "Needs Split?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [750, 0]
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "mode": "list",
+          "value": ""
+        },
+        "options": {}
+      },
+      "id": "phase2",
+      "name": "Phase 2: Fix Structure",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [1000, -100],
+      "notes": "Import phase2-structure.json as a separate workflow and link its ID here"
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "mode": "list",
+          "value": ""
+        },
+        "options": {}
+      },
+      "id": "phase3",
+      "name": "Phase 3: Fix Copy",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [1250, 0],
+      "notes": "Import phase3-copy.json as a separate workflow and link its ID here"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Build the diagnosis report as Markdown\nconst data = $input.first().json;\nconst date = new Date().toISOString().slice(0, 10);\n\nlet report = `# Ad Relevance Diagnosis Report\\n`;\nreport += `**Date:** ${date}\\n`;\nreport += `**Customer ID:** ${data.customerId}\\n\\n`;\n\nreport += `## Diagnosis\\n`;\nreport += `- Headline Test: ${data.headlineTest?.passes ? 'PASS' : 'FAIL'}\\n`;\nreport += `- Intent Alignment: ${data.intentClassification?.copyMatchesIntent ? 'ALIGNED' : 'MISMATCHED'}\\n`;\nreport += `- Dominant Intent: ${data.intentClassification?.dominantIntent || 'Unknown'}\\n\\n`;\n\nif (data.generatedHeadlines) {\n  report += `## Generated Headlines (${data.generatedHeadlines.method})\\n`;\n  for (const h of data.generatedHeadlines.headlines || []) {\n    report += `- H${h.position}: \"${h.text}\" (${h.charCount} chars)${h.pinTo ? ' [Pin ' + h.pinTo + ']' : ''}\\n`;\n  }\n  report += '\\n';\n}\n\nif (data.generatedDescriptions) {\n  report += `## Generated Descriptions\\n`;\n  for (const d of data.generatedDescriptions.descriptions || []) {\n    report += `- D${d.position}: \"${d.text}\" (${d.charCount} chars)${d.containsKeyword ? ' [Keyword]' : ''}\\n`;\n  }\n  report += '\\n';\n}\n\n// Build CSV content for RSA ads\nconst csvHeaders = ['Campaign', 'Ad Group', ...Array.from({length: 15}, (_, i) => `Headline ${i+1}`), ...Array.from({length: 4}, (_, i) => `Description ${i+1}`), 'Final URL', 'Ad status'];\nconst headlines = data.generatedHeadlines?.headlines || [];\nconst descriptions = data.generatedDescriptions?.descriptions || [];\nconst csvRow = [\n  data.campaignName || '',\n  data.adGroupName || '',\n  ...Array.from({length: 15}, (_, i) => headlines.find(h => h.position === i+1)?.text || ''),\n  ...Array.from({length: 4}, (_, i) => descriptions.find(d => d.position === i+1)?.text || ''),\n  data.rsaAds?.[0]?.finalUrls?.[0] || '',\n  'Enabled'\n];\n\nconst csvContent = '\\uFEFF' + csvHeaders.join(',') + '\\n' + csvRow.map(v => '\"' + String(v).replace(/\"/g, '\"\"') + '\"').join(',');\n\nreturn [{\n  json: {\n    report,\n    csvContent,\n    ...data\n  }\n}];"
+      },
+      "id": "build-output",
+      "name": "Build Report & CSV",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1500, 0]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Return final output\nconst data = $input.first().json;\nreturn [{\n  json: {\n    status: 'completed',\n    adGroupName: data.adGroupName,\n    headlineTestPassed: data.headlineTest?.passes,\n    intentAligned: data.intentClassification?.copyMatchesIntent,\n    dominantIntent: data.intentClassification?.dominantIntent,\n    headlinesGenerated: data.generatedHeadlines?.headlines?.length || 0,\n    descriptionsGenerated: data.generatedDescriptions?.descriptions?.length || 0,\n    report: data.report,\n    csvContent: data.csvContent\n  }\n}];"
+      },
+      "id": "final-output",
+      "name": "Final Output",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1750, 0]
+    }
+  ],
+  "connections": {
+    "Weekly Schedule": {
+      "main": [
+        [{ "node": "Set Config", "type": "main", "index": 0 }]
+      ]
+    },
+    "Webhook Trigger": {
+      "main": [
+        [{ "node": "Set Config", "type": "main", "index": 0 }]
+      ]
+    },
+    "Set Config": {
+      "main": [
+        [{ "node": "Phase 1: Diagnose", "type": "main", "index": 0 }]
+      ]
+    },
+    "Phase 1: Diagnose": {
+      "main": [
+        [{ "node": "Needs Split?", "type": "main", "index": 0 }]
+      ]
+    },
+    "Needs Split?": {
+      "main": [
+        [{ "node": "Phase 2: Fix Structure", "type": "main", "index": 0 }],
+        [{ "node": "Phase 3: Fix Copy", "type": "main", "index": 0 }]
+      ]
+    },
+    "Phase 2: Fix Structure": {
+      "main": [
+        [{ "node": "Phase 3: Fix Copy", "type": "main", "index": 0 }]
+      ]
+    },
+    "Phase 3: Fix Copy": {
+      "main": [
+        [{ "node": "Build Report & CSV", "type": "main", "index": 0 }]
+      ]
+    },
+    "Build Report & CSV": {
+      "main": [
+        [{ "node": "Final Output", "type": "main", "index": 0 }]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}

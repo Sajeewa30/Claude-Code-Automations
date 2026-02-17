@@ -1,0 +1,102 @@
+{
+  "name": "Ad Relevance SOP - Phase 3: Fix Copy",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "trigger",
+      "name": "Execute Workflow Trigger",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1,
+      "position": [0, 0]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.anthropic.com/v1/messages",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "x-api-key", "value": "={{ $env.ANTHROPIC_API_KEY }}" },
+            { "name": "anthropic-version", "value": "2023-06-01" },
+            { "name": "content-type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ model: 'claude-sonnet-4-5-20250929', max_tokens: 3000, messages: [{ role: 'user', content: 'Generate 15 RSA headlines (each MAX 30 chars) for this ad group.\\n\\nAd Group: \"' + $json.adGroupName + '\"\\nKeywords: ' + $json.keywords.map(k => '\"' + k.text + '\"').join(', ') + '\\nDominant Intent: ' + ($json.intentClassification?.dominantIntent || 'TRANSACTIONAL') + '\\nLanding Page: ' + ($json.rsaAds?.[0]?.finalUrls?.[0] || '(unknown)') + '\\n\\nStructure: H1=relevance anchor (pin pos 1), H2=value prop, H3=CTA (pin pos 3), H4-H8=semantic signals, H9-H12=features, H13-H15=trust/urgency.\\n\\nSpread keyword relevance across multiple headlines. Choose method: STATIC (few keywords), DKI (many variations), COMBO (mixed).\\n\\nReturn JSON: { \"method\": \"STATIC\"|\"DKI\"|\"COMBO\", \"headlines\": [{ \"position\": number, \"text\": string, \"pinTo\": number|null, \"purpose\": string, \"charCount\": number }], \"dkiDefault\": string|null }\\n\\nDouble-check every headline is <= 30 chars.' }] }) }}"
+      },
+      "id": "generate-headlines",
+      "name": "Generate Headlines (Claude)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [250, -100]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse headlines and validate character limits\nconst raw = $('Generate Headlines (Claude)').first().json;\nconst text = raw.content?.[0]?.text || '';\nconst match = text.match(/```(?:json)?\\s*([\\s\\S]*?)```/);\nconst result = JSON.parse(match ? match[1].trim() : text.trim());\n\n// Flag any over-length headlines\nconst overLength = result.headlines.filter(h => h.text.length > 30);\nif (overLength.length > 0) {\n  result._warnings = overLength.map(h => `H${h.position}: \"${h.text}\" (${h.text.length} chars)`);\n}\n\nconst input = $('Execute Workflow Trigger').first().json;\nreturn [{ json: { ...input, generatedHeadlines: result } }];"
+      },
+      "id": "parse-headlines",
+      "name": "Parse & Validate Headlines",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [500, -100]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.anthropic.com/v1/messages",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "x-api-key", "value": "={{ $env.ANTHROPIC_API_KEY }}" },
+            { "name": "anthropic-version", "value": "2023-06-01" },
+            { "name": "content-type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ model: 'claude-sonnet-4-5-20250929', max_tokens: 2048, messages: [{ role: 'user', content: 'Generate 4 RSA descriptions (each MAX 90 chars) for this ad group.\\n\\nAd Group: \"' + $json.adGroupName + '\"\\nKeywords: ' + $json.keywords.map(k => '\"' + k.text + '\"').join(', ') + '\\nDominant Intent: ' + ($json.intentClassification?.dominantIntent || 'TRANSACTIONAL') + '\\nHeadlines: ' + $json.generatedHeadlines.headlines.map(h => 'H' + h.position + ': \"' + h.text + '\"').join(', ') + '\\n\\nD1: core keyword + primary benefit (MUST include keyword). D2: proof/social proof. D3: feature + benefit. D4: CTA + urgency.\\n\\nReturn JSON: { \"descriptions\": [{ \"position\": number, \"text\": string, \"purpose\": string, \"containsKeyword\": boolean, \"charCount\": number }] }\\n\\nDouble-check every description is <= 90 chars.' }] }) }}"
+      },
+      "id": "generate-descriptions",
+      "name": "Generate Descriptions (Claude)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [750, -100]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse descriptions and compile final copy\nconst raw = $('Generate Descriptions (Claude)').first().json;\nconst text = raw.content?.[0]?.text || '';\nconst match = text.match(/```(?:json)?\\s*([\\s\\S]*?)```/);\nconst descriptions = JSON.parse(match ? match[1].trim() : text.trim());\n\nconst input = $('Parse & Validate Headlines').first().json;\n\nreturn [{\n  json: {\n    ...input,\n    generatedDescriptions: descriptions\n  }\n}];"
+      },
+      "id": "compile-copy",
+      "name": "Compile Copy Output",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1000, -100]
+    }
+  ],
+  "connections": {
+    "Execute Workflow Trigger": {
+      "main": [
+        [{ "node": "Generate Headlines (Claude)", "type": "main", "index": 0 }]
+      ]
+    },
+    "Generate Headlines (Claude)": {
+      "main": [
+        [{ "node": "Parse & Validate Headlines", "type": "main", "index": 0 }]
+      ]
+    },
+    "Parse & Validate Headlines": {
+      "main": [
+        [{ "node": "Generate Descriptions (Claude)", "type": "main", "index": 0 }]
+      ]
+    },
+    "Generate Descriptions (Claude)": {
+      "main": [
+        [{ "node": "Compile Copy Output", "type": "main", "index": 0 }]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}

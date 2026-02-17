@@ -1,0 +1,21 @@
+{
+  "name": "ad-relevance-sop-automation",
+  "version": "1.0.0",
+  "description": "Google Ads 'Improve Ad Relevance' SOP automation - Claude Code + n8n",
+  "type": "module",
+  "scripts": {
+    "diagnose": "tsx src/analysis/headline-test.ts",
+    "classify": "tsx src/analysis/intent-classifier.ts",
+    "generate": "tsx src/generation/headline-writer.ts"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.39.0",
+    "csv-stringify": "^6.5.0",
+    "dotenv": "^16.4.0"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.0",
+    "@types/node": "^22.0.0"
+  }
+}

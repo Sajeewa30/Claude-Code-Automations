@@ -1,0 +1,141 @@
+{
+  "name": "Ad Relevance SOP - Phase 2: Fix Structure",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "trigger",
+      "name": "Execute Workflow Trigger",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1,
+      "position": [0, 0]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ $json.needsSplit }}",
+              "value2": true
+            }
+          ]
+        }
+      },
+      "id": "check-needs-split",
+      "name": "Needs Split?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [250, 0]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://googleads.googleapis.com/v18/customers/{{ $json.customerId }}/googleAds:searchStream",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleAdsOAuth2Api",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "developer-token", "value": "={{ $json.developerToken }}" },
+            { "name": "login-customer-id", "value": "={{ $json.loginCustomerId }}" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ query: \"SELECT ad_group.id, ad_group.name, search_term_view.search_term, search_term_view.status, metrics.impressions, metrics.clicks, metrics.conversions, metrics.cost_micros FROM search_term_view WHERE campaign.status = 'ENABLED' AND ad_group.id = \" + $json.adGroupId + \" AND segments.date DURING \" + ($json.dateRange || 'LAST_30_DAYS') + \" AND metrics.impressions > 0 ORDER BY metrics.impressions DESC\" }) }}"
+      },
+      "id": "fetch-search-terms",
+      "name": "Fetch Search Terms",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [500, -100]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.anthropic.com/v1/messages",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "x-api-key", "value": "={{ $env.ANTHROPIC_API_KEY }}" },
+            { "name": "anthropic-version", "value": "2023-06-01" },
+            { "name": "content-type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ model: 'claude-sonnet-4-5-20250929', max_tokens: 3000, messages: [{ role: 'user', content: 'You are restructuring a Google Ads ad group that failed the Headline Test.\\n\\nAd Group: \"' + $json.adGroupName + '\"\\nCampaign: \"' + $json.campaignName + '\"\\n\\nIntent Clusters:\\n' + JSON.stringify($json.headlineTest.intentClusters, null, 2) + '\\n\\nKeywords with Metrics:\\n' + $json.keywords.map(k => '- \"' + k.text + '\" (' + k.matchType + ') | Imp: ' + k.impressions + ' | Clicks: ' + k.clicks).join('\\n') + '\\n\\nRecommend new ad group structure. Each must pass the Headline Test. Include negative keywords for traffic routing.\\n\\nReturn JSON: { \"currentAdGroup\": string, \"recommendedAdGroups\": [{ \"name\": string, \"theme\": string, \"keywords\": [{ \"text\": string, \"matchType\": string }], \"negativeKeywords\": [{ \"text\": string, \"matchType\": string }], \"suggestedHeadline\": string }], \"reasoning\": string }' }] }) }}"
+      },
+      "id": "split-recommend",
+      "name": "Split Recommendation (Claude)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [500, 100]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.anthropic.com/v1/messages",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "x-api-key", "value": "={{ $env.ANTHROPIC_API_KEY }}" },
+            { "name": "anthropic-version", "value": "2023-06-01" },
+            { "name": "content-type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ model: 'claude-sonnet-4-5-20250929', max_tokens: 3000, messages: [{ role: 'user', content: 'Analyze search terms for keyword promotion.\\n\\nAd Group: \"' + $json.adGroupName + '\"\\n\\nCurrent Keywords:\\n' + $json.keywords.map(k => '- \"' + k.text + '\" (' + k.matchType + ')').join('\\n') + '\\n\\nSearch Terms (imp >= 50):\\n' + $json.searchTerms.filter(st => st.impressions >= 50).map(st => '- \"' + st.searchTerm + '\" | Imp: ' + st.impressions + ' | Clicks: ' + st.clicks + ' | Conv: ' + st.conversions).join('\\n') + '\\n\\nDecide: PROMOTE_EXACT, PROMOTE_PHRASE, DKI_CANDIDATE, IGNORE, or NEGATIVE.\\n\\nReturn JSON: { \"recommendations\": [{ \"searchTerm\": string, \"action\": string, \"reasoning\": string }] }' }] }) }}"
+      },
+      "id": "query-promotion",
+      "name": "Query Promotion (Claude)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [750, -100]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Compile Phase 2 results\nconst diagnosis = $('Execute Workflow Trigger').first().json;\nconst splitRaw = $('Split Recommendation (Claude)').first().json;\nconst promoRaw = $('Query Promotion (Claude)').first().json;\n\nfunction parseClaudeResponse(response) {\n  const text = response.content?.[0]?.text || '';\n  const match = text.match(/```(?:json)?\\s*([\\s\\S]*?)```/);\n  return JSON.parse(match ? match[1].trim() : text.trim());\n}\n\nreturn [{\n  json: {\n    ...diagnosis,\n    splitRecommendation: parseClaudeResponse(splitRaw),\n    queryPromotions: parseClaudeResponse(promoRaw)\n  }\n}];"
+      },
+      "id": "compile-structure",
+      "name": "Compile Structure Changes",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1000, 0]
+    }
+  ],
+  "connections": {
+    "Execute Workflow Trigger": {
+      "main": [
+        [{ "node": "Needs Split?", "type": "main", "index": 0 }]
+      ]
+    },
+    "Needs Split?": {
+      "main": [
+        [
+          { "node": "Fetch Search Terms", "type": "main", "index": 0 },
+          { "node": "Split Recommendation (Claude)", "type": "main", "index": 0 }
+        ],
+        []
+      ]
+    },
+    "Fetch Search Terms": {
+      "main": [
+        [{ "node": "Query Promotion (Claude)", "type": "main", "index": 0 }]
+      ]
+    },
+    "Split Recommendation (Claude)": {
+      "main": [
+        [{ "node": "Compile Structure Changes", "type": "main", "index": 0 }]
+      ]
+    },
+    "Query Promotion (Claude)": {
+      "main": [
+        [{ "node": "Compile Structure Changes", "type": "main", "index": 0 }]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}

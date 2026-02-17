@@ -1,0 +1,739 @@
+{
+  "name": "Ad Relevance SOP - Complete Automation",
+  "tags": [],
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "ad-relevance-sop",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "id": "a1000000-0000-0000-0000-000000000001",
+      "name": "Webhook Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [0, 300],
+      "webhookId": "ad-relevance-sop"
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "weeks",
+              "weekday": 1,
+              "hour": 9
+            }
+          ]
+        }
+      },
+      "id": "a1000000-0000-0000-0000-000000000002",
+      "name": "Weekly Schedule",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [0, 60],
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// ========================================\n// SET CONFIG\n// ========================================\n// Reads input from webhook or sets defaults.\n// Webhook body should be: { customerId, loginCustomerId, developerToken, anthropicApiKey, dateRange }\n\nconst input = $input.first().json;\nconst body = input.body || input;\n\nreturn [{\n  json: {\n    customerId: (body.customerId || '').replace(/-/g, ''),\n    loginCustomerId: (body.loginCustomerId || '').replace(/-/g, ''),\n    developerToken: body.developerToken || '',\n    anthropicApiKey: body.anthropicApiKey || '',\n    dateRange: body.dateRange || 'LAST_30_DAYS'\n  }\n}];"
+      },
+      "id": "a1000000-0000-0000-0000-000000000010",
+      "name": "Set Config",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [260, 180]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://googleads.googleapis.com/v18/customers/{{ $json.customerId }}/googleAds:searchStream",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleAdsOAuth2Api",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "developer-token",
+              "value": "={{ $json.developerToken }}"
+            },
+            {
+              "name": "login-customer-id",
+              "value": "={{ $json.loginCustomerId }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ query: `SELECT ad_group.id, ad_group.name, campaign.id, campaign.name, ad_group_criterion.keyword.text, ad_group_criterion.keyword.match_type, metrics.impressions, metrics.clicks, metrics.conversions, metrics.cost_micros, metrics.average_cpc FROM keyword_view WHERE campaign.status = 'ENABLED' AND ad_group.status = 'ENABLED' AND ad_group_criterion.status = 'ENABLED' AND segments.date DURING ${$json.dateRange} ORDER BY metrics.impressions DESC` }) }}",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true
+            }
+          }
+        }
+      },
+      "id": "a1000000-0000-0000-0000-000000000020",
+      "name": "Fetch Keywords",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [520, 60],
+      "retryOnFail": true
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://googleads.googleapis.com/v18/customers/{{ $('Set Config').item.json.customerId }}/googleAds:searchStream",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleAdsOAuth2Api",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "developer-token",
+              "value": "={{ $('Set Config').item.json.developerToken }}"
+            },
+            {
+              "name": "login-customer-id",
+              "value": "={{ $('Set Config').item.json.loginCustomerId }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ query: `SELECT ad_group.id, ad_group.name, ad_group_ad.ad.id, ad_group_ad.ad.responsive_search_ad.headlines, ad_group_ad.ad.responsive_search_ad.descriptions, ad_group_ad.status, ad_group_ad.ad.final_urls FROM ad_group_ad WHERE ad_group_ad.ad.type = 'RESPONSIVE_SEARCH_AD' AND campaign.status = 'ENABLED' AND ad_group.status = 'ENABLED'` }) }}",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true
+            }
+          }
+        }
+      },
+      "id": "a1000000-0000-0000-0000-000000000021",
+      "name": "Fetch RSA Ads",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [520, 300],
+      "retryOnFail": true
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://googleads.googleapis.com/v18/customers/{{ $('Set Config').item.json.customerId }}/googleAds:searchStream",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleAdsOAuth2Api",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "developer-token",
+              "value": "={{ $('Set Config').item.json.developerToken }}"
+            },
+            {
+              "name": "login-customer-id",
+              "value": "={{ $('Set Config').item.json.loginCustomerId }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ query: `SELECT ad_group.id, ad_group.name, search_term_view.search_term, search_term_view.status, metrics.impressions, metrics.clicks, metrics.conversions, metrics.cost_micros FROM search_term_view WHERE campaign.status = 'ENABLED' AND segments.date DURING ${$('Set Config').item.json.dateRange} AND metrics.impressions > 0 ORDER BY metrics.impressions DESC` }) }}",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true
+            }
+          }
+        }
+      },
+      "id": "a1000000-0000-0000-0000-000000000022",
+      "name": "Fetch Search Terms",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [520, 540],
+      "retryOnFail": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// ========================================\n// GROUP ALL DATA BY AD GROUP\n// ========================================\n// Merges keywords, RSA ads, and search terms into ad group bundles.\n\nconst config = $('Set Config').first().json;\n\n// Parse Google Ads searchStream responses (array of batches)\nfunction parseStream(data) {\n  const body = data?.body || data;\n  const arr = Array.isArray(body) ? body : [body];\n  return arr.flatMap(batch => batch.results || []);\n}\n\nconst keywordRows = parseStream($('Fetch Keywords').first().json);\nconst rsaRows = parseStream($('Fetch RSA Ads').first().json);\nconst searchTermRows = parseStream($('Fetch Search Terms').first().json);\n\n// Group by ad group ID\nconst adGroups = new Map();\n\nfor (const row of keywordRows) {\n  const agId = row.adGroup.id;\n  if (!adGroups.has(agId)) {\n    adGroups.set(agId, {\n      adGroupId: agId,\n      adGroupName: row.adGroup.name,\n      campaignId: row.campaign.id,\n      campaignName: row.campaign.name,\n      keywords: [],\n      rsaAds: [],\n      searchTerms: [],\n      config\n    });\n  }\n  adGroups.get(agId).keywords.push({\n    text: row.adGroupCriterion.keyword.text,\n    matchType: row.adGroupCriterion.keyword.matchType,\n    impressions: Number(row.metrics.impressions || 0),\n    clicks: Number(row.metrics.clicks || 0),\n    conversions: Number(row.metrics.conversions || 0),\n    costMicros: Number(row.metrics.costMicros || 0)\n  });\n}\n\nfor (const row of rsaRows) {\n  const agId = row.adGroup.id;\n  if (adGroups.has(agId)) {\n    const rsa = row.adGroupAd?.ad?.responsiveSearchAd;\n    adGroups.get(agId).rsaAds.push({\n      headlines: (rsa?.headlines || []).map(h => h.text),\n      descriptions: (rsa?.descriptions || []).map(d => d.text),\n      finalUrls: row.adGroupAd?.ad?.finalUrls || []\n    });\n  }\n}\n\nfor (const row of searchTermRows) {\n  const agId = row.adGroup.id;\n  if (adGroups.has(agId)) {\n    adGroups.get(agId).searchTerms.push({\n      searchTerm: row.searchTermView.searchTerm,\n      status: row.searchTermView.status,\n      impressions: Number(row.metrics.impressions || 0),\n      clicks: Number(row.metrics.clicks || 0),\n      conversions: Number(row.metrics.conversions || 0),\n      costMicros: Number(row.metrics.costMicros || 0)\n    });\n  }\n}\n\n// Return one item per ad group (for loop processing)\nconst bundles = Array.from(adGroups.values())\n  .filter(ag => ag.keywords.length > 0)\n  .sort((a, b) => {\n    const aImp = a.keywords.reduce((s, k) => s + k.impressions, 0);\n    const bImp = b.keywords.reduce((s, k) => s + k.impressions, 0);\n    return bImp - aImp;\n  });\n\nreturn bundles.map(ag => ({ json: ag }));"
+      },
+      "id": "a1000000-0000-0000-0000-000000000030",
+      "name": "Group by Ad Group",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [820, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.anthropic.com/v1/messages",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-api-key",
+              "value": "={{ $json.config.anthropicApiKey }}"
+            },
+            {
+              "name": "anthropic-version",
+              "value": "2023-06-01"
+            },
+            {
+              "name": "content-type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\n  model: 'claude-sonnet-4-5-20250929',\n  max_tokens: 2048,\n  messages: [{\n    role: 'user',\n    content: `You are a Google Ads specialist performing the \"Headline Test\" from the Improve Ad Relevance SOP.\n\nAd Group: \"${$json.adGroupName}\"\n\nKeywords (sorted by impressions desc):\n${$json.keywords.map(k => `- \"${k.text}\" (${k.matchType}, ${k.impressions} imp, ${k.clicks} clicks)`).join('\\n')}\n\nTask: Determine if a SINGLE headline (max 30 chars) could relevantly address ALL keywords.\n\nRules:\n- Passes if a searcher using ANY keyword would see the headline as relevant\n- Different funnel stages (info vs transactional) = FAIL\n- Close variants / singular-plural = do NOT fail\n\nReturn JSON ONLY (no markdown, no explanation):\n{\n  \"passes\": boolean,\n  \"suggestedHeadline\": string | null,\n  \"intentClusters\": [{ \"clusterName\": string, \"theme\": string, \"keywords\": string[], \"suggestedHeadline\": string }],\n  \"reasoning\": string\n}\n\nIf passes=true, intentClusters=[]. If passes=false, suggestedHeadline=null.`\n  }]\n}) }}",
+        "options": {}
+      },
+      "id": "a1000000-0000-0000-0000-000000000040",
+      "name": "Phase 1.1 - Headline Test",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1100, 180]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.anthropic.com/v1/messages",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-api-key",
+              "value": "={{ $('Group by Ad Group').item.json.config.anthropicApiKey }}"
+            },
+            {
+              "name": "anthropic-version",
+              "value": "2023-06-01"
+            },
+            {
+              "name": "content-type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\n  model: 'claude-sonnet-4-5-20250929',\n  max_tokens: 2048,\n  messages: [{\n    role: 'user',\n    content: `Classify each keyword by search intent and check ad copy alignment.\n\nAd Group: \"${$('Group by Ad Group').item.json.adGroupName}\"\n\nKeywords:\n${$('Group by Ad Group').item.json.keywords.map(k => `- \"${k.text}\" (${k.impressions} imp)`).join('\\n')}\n\nCurrent RSA Headlines:\n${($('Group by Ad Group').item.json.rsaAds[0]?.headlines || ['(none)']).map(h => `- \"${h}\"`).join('\\n')}\n\nCurrent RSA Descriptions:\n${($('Group by Ad Group').item.json.rsaAds[0]?.descriptions || ['(none)']).map(d => `- \"${d}\"`).join('\\n')}\n\nIntent types: INFORMATIONAL (how-to, what-is), COMMERCIAL (best, review, vs), TRANSACTIONAL (buy, price, demo).\n\nReturn JSON ONLY:\n{\n  \"keywords\": [{ \"keyword\": string, \"intent\": \"INFORMATIONAL\"|\"COMMERCIAL\"|\"TRANSACTIONAL\", \"confidence\": number }],\n  \"dominantIntent\": string,\n  \"copyMatchesIntent\": boolean,\n  \"mismatchDetails\": string | null,\n  \"recommendedCopyDirection\": string\n}`\n  }]\n}) }}",
+        "options": {}
+      },
+      "id": "a1000000-0000-0000-0000-000000000041",
+      "name": "Phase 1.2 - Intent Classification",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1100, 420]
+    },
+    {
+      "parameters": {
+        "jsCode": "// ========================================\n// COMPILE PHASE 1 DIAGNOSIS\n// ========================================\n\nfunction parseClaudeResponse(response) {\n  const text = response?.content?.[0]?.text || '';\n  const match = text.match(/```(?:json)?\\s*([\\s\\S]*?)```/);\n  try {\n    return JSON.parse(match ? match[1].trim() : text.trim());\n  } catch (e) {\n    return { error: 'Failed to parse Claude response', raw: text };\n  }\n}\n\nconst adGroup = $('Group by Ad Group').item.json;\nconst headlineTest = parseClaudeResponse($('Phase 1.1 - Headline Test').first().json);\nconst intentClassify = parseClaudeResponse($('Phase 1.2 - Intent Classification').first().json);\n\nreturn [{\n  json: {\n    // Carry forward all original data\n    ...adGroup,\n    // Add Phase 1 results\n    headlineTest,\n    intentClassification: intentClassify,\n    needsSplit: !headlineTest.passes,\n    needsCopyFix: true,\n    totalImpressions: adGroup.keywords.reduce((sum, k) => sum + k.impressions, 0)\n  }\n}];"
+      },
+      "id": "a1000000-0000-0000-0000-000000000050",
+      "name": "Compile Phase 1 Results",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1380, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "needs-split-check",
+              "leftValue": "={{ $json.needsSplit }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "a1000000-0000-0000-0000-000000000060",
+      "name": "Needs Structure Fix?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1620, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.anthropic.com/v1/messages",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-api-key",
+              "value": "={{ $json.config.anthropicApiKey }}"
+            },
+            {
+              "name": "anthropic-version",
+              "value": "2023-06-01"
+            },
+            {
+              "name": "content-type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\n  model: 'claude-sonnet-4-5-20250929',\n  max_tokens: 3000,\n  messages: [{\n    role: 'user',\n    content: `You are restructuring a Google Ads ad group that failed the Headline Test.\n\nAd Group: \"${$json.adGroupName}\"\nCampaign: \"${$json.campaignName}\"\n\nIntent Clusters Identified:\n${JSON.stringify($json.headlineTest.intentClusters, null, 2)}\n\nAll Keywords with Metrics:\n${$json.keywords.map(k => `- \"${k.text}\" (${k.matchType}) | Imp: ${k.impressions} | Clicks: ${k.clicks} | Conv: ${k.conversions}`).join('\\n')}\n\nRecommend new ad group structure:\n1. Each new ad group must have one coherent intent (pass headline test)\n2. Name them: \"{CampaignTheme} - {Intent}\"\n3. Include negative keywords for traffic routing between groups\n4. Preserve highest-performing ad group name\n\nReturn JSON ONLY:\n{\n  \"currentAdGroup\": string,\n  \"recommendedAdGroups\": [{\n    \"name\": string,\n    \"theme\": string,\n    \"keywords\": [{ \"text\": string, \"matchType\": string }],\n    \"negativeKeywords\": [{ \"text\": string, \"matchType\": string }],\n    \"suggestedHeadline\": string\n  }],\n  \"reasoning\": string\n}`\n  }]\n}) }}",
+        "options": {}
+      },
+      "id": "a1000000-0000-0000-0000-000000000070",
+      "name": "Phase 2.1 - Split Recommendation",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1900, 120]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.anthropic.com/v1/messages",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-api-key",
+              "value": "={{ $('Compile Phase 1 Results').item.json.config.anthropicApiKey }}"
+            },
+            {
+              "name": "anthropic-version",
+              "value": "2023-06-01"
+            },
+            {
+              "name": "content-type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\n  model: 'claude-sonnet-4-5-20250929',\n  max_tokens: 3000,\n  messages: [{\n    role: 'user',\n    content: `Analyze search terms for keyword promotion opportunities.\n\nAd Group: \"${$('Compile Phase 1 Results').item.json.adGroupName}\"\n\nCurrent Keywords:\n${$('Compile Phase 1 Results').item.json.keywords.map(k => `- \"${k.text}\" (${k.matchType})`).join('\\n')}\n\nSearch Terms (filtered to imp >= 50):\n${$('Compile Phase 1 Results').item.json.searchTerms.filter(st => st.impressions >= 50).map(st => `- \"${st.searchTerm}\" | Imp: ${st.impressions} | Clicks: ${st.clicks} | Conv: ${st.conversions}`).join('\\n') || '(no search terms with 50+ impressions)'}\n\nDecide for each: PROMOTE_EXACT, PROMOTE_PHRASE, DKI_CANDIDATE, IGNORE, or NEGATIVE.\nOnly promote if query adds DISTINCT DKI or QS monitoring value.\n\nReturn JSON ONLY:\n{ \"recommendations\": [{ \"searchTerm\": string, \"action\": string, \"reasoning\": string, \"metrics\": { \"impressions\": number, \"clicks\": number, \"conversions\": number } }] }`\n  }]\n}) }}",
+        "options": {}
+      },
+      "id": "a1000000-0000-0000-0000-000000000071",
+      "name": "Phase 2.2 - Query Promotion",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1900, 360]
+    },
+    {
+      "parameters": {
+        "jsCode": "// ========================================\n// COMPILE PHASE 2 RESULTS\n// ========================================\n\nfunction parseClaudeResponse(response) {\n  const text = response?.content?.[0]?.text || '';\n  const match = text.match(/```(?:json)?\\s*([\\s\\S]*?)```/);\n  try {\n    return JSON.parse(match ? match[1].trim() : text.trim());\n  } catch (e) {\n    return { error: 'Failed to parse', raw: text };\n  }\n}\n\nconst adGroup = $('Compile Phase 1 Results').item.json;\nconst splitResult = parseClaudeResponse($('Phase 2.1 - Split Recommendation').first().json);\nconst promoResult = parseClaudeResponse($('Phase 2.2 - Query Promotion').first().json);\n\nreturn [{\n  json: {\n    ...adGroup,\n    splitRecommendation: splitResult,\n    queryPromotions: promoResult\n  }\n}];"
+      },
+      "id": "a1000000-0000-0000-0000-000000000080",
+      "name": "Compile Phase 2 Results",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2180, 120]
+    },
+    {
+      "parameters": {
+        "jsCode": "// ========================================\n// SKIP PHASE 2 - Pass through data unchanged\n// ========================================\nconst adGroup = $('Compile Phase 1 Results').item.json;\n\nreturn [{\n  json: {\n    ...adGroup,\n    splitRecommendation: null,\n    queryPromotions: { recommendations: [] }\n  }\n}];"
+      },
+      "id": "a1000000-0000-0000-0000-000000000081",
+      "name": "Skip Phase 2",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2180, 420]
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "mergeByPosition": {
+          "join": "enrichInput1"
+        },
+        "options": {}
+      },
+      "id": "a1000000-0000-0000-0000-000000000082",
+      "name": "Merge Phase 2 Paths",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3,
+      "position": [2440, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.anthropic.com/v1/messages",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-api-key",
+              "value": "={{ $json.config.anthropicApiKey }}"
+            },
+            {
+              "name": "anthropic-version",
+              "value": "2023-06-01"
+            },
+            {
+              "name": "content-type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\n  model: 'claude-sonnet-4-5-20250929',\n  max_tokens: 3000,\n  messages: [{\n    role: 'user',\n    content: `Generate 15 RSA headlines (each MAX 30 characters) for this ad group.\n\nAd Group: \"${$json.adGroupName}\"\nKeywords: ${$json.keywords.map(k => `\"${k.text}\"`).join(', ')}\nDominant Intent: ${$json.intentClassification?.dominantIntent || 'TRANSACTIONAL'}\nLanding Page: ${$json.rsaAds?.[0]?.finalUrls?.[0] || '(unknown)'}\n\nMethod selection:\n- STATIC: few keywords, branded/sensitive terms\n- DKI: many keyword variations, brand-safe text. Use {KeyWord:Default} syntax for H1\n- COMBO: mixed needs\n\nHeadline structure:\n- H1: Relevance anchor (core keyword or DKI) → Pin to Position 1\n- H2: Value proposition\n- H3: Call to action → Pin to Position 3\n- H4-H8: Semantic signal distribution (spread keyword relevance naturally)\n- H9-H12: Features/benefits\n- H13-H15: Trust/urgency/social proof\n\nIMPORTANT: Every headline MUST be 30 characters or fewer. Count carefully.\n\nReturn JSON ONLY:\n{\n  \"method\": \"STATIC\"|\"DKI\"|\"COMBO\",\n  \"headlines\": [{ \"position\": number, \"text\": string, \"pinTo\": number|null, \"purpose\": string, \"charCount\": number }],\n  \"dkiDefault\": string|null\n}`\n  }]\n}) }}",
+        "options": {}
+      },
+      "id": "a1000000-0000-0000-0000-000000000090",
+      "name": "Phase 3.1 - Generate Headlines",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2700, 180]
+    },
+    {
+      "parameters": {
+        "jsCode": "// ========================================\n// VALIDATE HEADLINES (char limits)\n// ========================================\n\nfunction parseClaudeResponse(response) {\n  const text = response?.content?.[0]?.text || '';\n  const match = text.match(/```(?:json)?\\s*([\\s\\S]*?)```/);\n  try {\n    return JSON.parse(match ? match[1].trim() : text.trim());\n  } catch (e) {\n    return { error: 'Failed to parse', raw: text };\n  }\n}\n\nconst adGroup = $('Merge Phase 2 Paths').item.json;\nconst headlines = parseClaudeResponse($('Phase 3.1 - Generate Headlines').first().json);\n\n// Validate character limits\nconst warnings = [];\nif (headlines.headlines) {\n  for (const h of headlines.headlines) {\n    h.charCount = h.text.length;\n    if (h.text.length > 30) {\n      warnings.push(`H${h.position}: \"${h.text}\" (${h.text.length} chars - OVER LIMIT)`);\n      // Truncate as fallback\n      h.text = h.text.substring(0, 30);\n      h.charCount = 30;\n    }\n  }\n}\n\nreturn [{\n  json: {\n    ...adGroup,\n    generatedHeadlines: headlines,\n    headlineWarnings: warnings\n  }\n}];"
+      },
+      "id": "a1000000-0000-0000-0000-000000000091",
+      "name": "Validate Headlines",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2960, 180]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.anthropic.com/v1/messages",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-api-key",
+              "value": "={{ $json.config.anthropicApiKey }}"
+            },
+            {
+              "name": "anthropic-version",
+              "value": "2023-06-01"
+            },
+            {
+              "name": "content-type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\n  model: 'claude-sonnet-4-5-20250929',\n  max_tokens: 2048,\n  messages: [{\n    role: 'user',\n    content: `Generate 4 RSA descriptions (each MAX 90 characters) for this ad group.\n\nAd Group: \"${$json.adGroupName}\"\nKeywords: ${$json.keywords.map(k => `\"${k.text}\"`).join(', ')}\nDominant Intent: ${$json.intentClassification?.dominantIntent || 'TRANSACTIONAL'}\nHeadlines written: ${$json.generatedHeadlines?.headlines?.map(h => `H${h.position}: \"${h.text}\"`).join(', ') || '(none)'}\nLanding Page: ${$json.rsaAds?.[0]?.finalUrls?.[0] || '(unknown)'}\n\nDescription structure:\n- D1: Core keyword phrase + primary benefit (MUST include main keyword naturally - triggers bold text)\n- D2: Proof point or social proof (numbers, awards, experience)\n- D3: Feature expansion + secondary benefit\n- D4: CTA with urgency or additional context\n\nRules:\n- D1 MUST contain the core keyword phrase\n- Each description must stand alone\n- Do NOT repeat headlines - add NEW information\n- Every description MUST be 90 chars or fewer\n\nReturn JSON ONLY:\n{ \"descriptions\": [{ \"position\": number, \"text\": string, \"purpose\": string, \"containsKeyword\": boolean, \"charCount\": number }] }`\n  }]\n}) }}",
+        "options": {}
+      },
+      "id": "a1000000-0000-0000-0000-000000000092",
+      "name": "Phase 3.2 - Generate Descriptions",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [3220, 180]
+    },
+    {
+      "parameters": {
+        "jsCode": "// ========================================\n// VALIDATE DESCRIPTIONS + BUILD FINAL OUTPUT\n// ========================================\n\nfunction parseClaudeResponse(response) {\n  const text = response?.content?.[0]?.text || '';\n  const match = text.match(/```(?:json)?\\s*([\\s\\S]*?)```/);\n  try {\n    return JSON.parse(match ? match[1].trim() : text.trim());\n  } catch (e) {\n    return { error: 'Failed to parse', raw: text };\n  }\n}\n\nconst adGroup = $('Validate Headlines').item.json;\nconst descriptions = parseClaudeResponse($('Phase 3.2 - Generate Descriptions').first().json);\n\n// Validate character limits\nconst warnings = [...(adGroup.headlineWarnings || [])];\nif (descriptions.descriptions) {\n  for (const d of descriptions.descriptions) {\n    d.charCount = d.text.length;\n    if (d.text.length > 90) {\n      warnings.push(`D${d.position}: \"${d.text}\" (${d.text.length} chars - OVER LIMIT)`);\n      d.text = d.text.substring(0, 90);\n      d.charCount = 90;\n    }\n  }\n}\n\nreturn [{\n  json: {\n    ...adGroup,\n    generatedDescriptions: descriptions,\n    allWarnings: warnings\n  }\n}];"
+      },
+      "id": "a1000000-0000-0000-0000-000000000100",
+      "name": "Validate Descriptions",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [3480, 180]
+    },
+    {
+      "parameters": {
+        "jsCode": "// ========================================\n// BUILD DIAGNOSIS REPORT (Markdown)\n// ========================================\n\nconst data = $input.first().json;\nconst date = new Date().toISOString().slice(0, 10);\n\nlet report = `# Ad Relevance Diagnosis Report\\n`;\nreport += `**Date:** ${date}\\n`;\nreport += `**Ad Group:** ${data.adGroupName}\\n`;\nreport += `**Campaign:** ${data.campaignName}\\n`;\nreport += `**Keywords:** ${data.keywords.length} | **Impressions:** ${data.totalImpressions?.toLocaleString() || 'N/A'}\\n\\n`;\n\nreport += `---\\n\\n`;\nreport += `## Phase 1: Diagnosis\\n\\n`;\n\n// 1.1 Headline Test\nconst ht = data.headlineTest;\nreport += `### 1.1 Headline Test: ${ht?.passes ? '✅ PASS' : '❌ FAIL'}\\n\\n`;\nif (ht?.passes) {\n  report += `Suggested headline: \"${ht.suggestedHeadline}\"\\n\\n`;\n} else if (ht?.intentClusters) {\n  report += `**${ht.intentClusters.length} intent clusters identified:**\\n\\n`;\n  report += `| Cluster | Theme | Keywords | Suggested Headline |\\n`;\n  report += `|---------|-------|----------|--------------------|\\n`;\n  for (const c of ht.intentClusters) {\n    report += `| ${c.clusterName} | ${c.theme} | ${c.keywords?.join(', ') || ''} | \"${c.suggestedHeadline}\" |\\n`;\n  }\n  report += `\\n`;\n}\nif (ht?.reasoning) report += `*Reasoning:* ${ht.reasoning}\\n\\n`;\n\n// 1.2 Intent Classification\nconst ic = data.intentClassification;\nreport += `### 1.2 Intent Alignment: ${ic?.copyMatchesIntent ? '✅ ALIGNED' : '⚠️ MISMATCHED'}\\n\\n`;\nreport += `**Dominant Intent:** ${ic?.dominantIntent || 'Unknown'}\\n`;\nif (!ic?.copyMatchesIntent && ic?.mismatchDetails) {\n  report += `**Mismatch:** ${ic.mismatchDetails}\\n`;\n}\nreport += `**Recommended direction:** ${ic?.recommendedCopyDirection || 'N/A'}\\n\\n`;\n\n// Phase 2 (if applicable)\nif (data.splitRecommendation && !data.splitRecommendation.error) {\n  report += `---\\n\\n`;\n  report += `## Phase 2: Structure Fixes\\n\\n`;\n  report += `### 2.1 Split Recommendation\\n\\n`;\n  for (const ag of (data.splitRecommendation.recommendedAdGroups || [])) {\n    report += `- **${ag.name}** (${ag.theme})\\n`;\n    report += `  - Keywords: ${ag.keywords?.map(k => `\"${k.text}\"`).join(', ') || 'N/A'}\\n`;\n    report += `  - Negatives: ${ag.negativeKeywords?.map(k => `\"${k.text}\" (${k.matchType})`).join(', ') || 'None'}\\n`;\n  }\n  report += `\\n`;\n}\n\nif (data.queryPromotions?.recommendations?.length > 0) {\n  const actionable = data.queryPromotions.recommendations.filter(r => r.action !== 'IGNORE');\n  if (actionable.length > 0) {\n    report += `### 2.2 Query Promotions\\n\\n`;\n    report += `| Search Term | Action | Reasoning |\\n`;\n    report += `|-------------|--------|-----------|\\n`;\n    for (const r of actionable) {\n      report += `| \"${r.searchTerm}\" | ${r.action} | ${r.reasoning} |\\n`;\n    }\n    report += `\\n`;\n  }\n}\n\n// Phase 3\nreport += `---\\n\\n`;\nreport += `## Phase 3: Generated Copy\\n\\n`;\n\nconst hl = data.generatedHeadlines;\nif (hl?.headlines) {\n  report += `### 3.1 Headlines (Method: ${hl.method})\\n\\n`;\n  report += `| # | Headline | Chars | Pin | Purpose |\\n`;\n  report += `|---|----------|-------|-----|---------|\\n`;\n  for (const h of hl.headlines) {\n    const pin = h.pinTo ? `Pos ${h.pinTo}` : '-';\n    report += `| H${h.position} | ${h.text} | ${h.charCount} | ${pin} | ${h.purpose} |\\n`;\n  }\n  report += `\\n`;\n}\n\nconst desc = data.generatedDescriptions;\nif (desc?.descriptions) {\n  report += `### 3.2 Descriptions\\n\\n`;\n  report += `| # | Description | Chars | Keyword? | Purpose |\\n`;\n  report += `|---|-------------|-------|----------|---------|\\n`;\n  for (const d of desc.descriptions) {\n    report += `| D${d.position} | ${d.text} | ${d.charCount} | ${d.containsKeyword ? 'Yes' : 'No'} | ${d.purpose} |\\n`;\n  }\n  report += `\\n`;\n}\n\n// Warnings\nif (data.allWarnings?.length > 0) {\n  report += `---\\n\\n`;\n  report += `## ⚠️ Warnings\\n\\n`;\n  for (const w of data.allWarnings) {\n    report += `- ${w}\\n`;\n  }\n  report += `\\n`;\n}\n\nreturn [{ json: { ...data, report } }];"
+      },
+      "id": "a1000000-0000-0000-0000-000000000110",
+      "name": "Build Report",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [3740, 180]
+    },
+    {
+      "parameters": {
+        "jsCode": "// ========================================\n// BUILD GOOGLE ADS EDITOR CSV\n// ========================================\n\nconst data = $input.first().json;\nconst headlines = data.generatedHeadlines?.headlines || [];\nconst descriptions = data.generatedDescriptions?.descriptions || [];\n\n// RSA Ads CSV\nconst csvHeaders = [\n  'Campaign', 'Ad Group',\n  ...Array.from({length: 15}, (_, i) => `Headline ${i+1}`),\n  ...Array.from({length: 4}, (_, i) => `Description ${i+1}`),\n  'Final URL', 'Path 1', 'Path 2', 'Ad status'\n];\n\nfunction csvEscape(val) {\n  const s = String(val || '');\n  if (s.includes(',') || s.includes('\"') || s.includes('\\n')) {\n    return '\"' + s.replace(/\"/g, '\"\"') + '\"';\n  }\n  return s;\n}\n\nconst csvRow = [\n  data.campaignName || '',\n  data.adGroupName || '',\n  ...Array.from({length: 15}, (_, i) => {\n    const h = headlines.find(h => h.position === i + 1);\n    return h?.text || '';\n  }),\n  ...Array.from({length: 4}, (_, i) => {\n    const d = descriptions.find(d => d.position === i + 1);\n    return d?.text || '';\n  }),\n  data.rsaAds?.[0]?.finalUrls?.[0] || '',\n  '', // Path 1\n  '', // Path 2\n  'Enabled'\n];\n\nconst rsaCsv = '\\uFEFF' + csvHeaders.map(csvEscape).join(',') + '\\n' + csvRow.map(csvEscape).join(',');\n\n// Negative Keywords CSV (if splits recommended)\nlet negativesCsv = '';\nif (data.splitRecommendation?.recommendedAdGroups) {\n  const negHeaders = ['Campaign', 'Ad Group', 'Keyword', 'Match Type', 'Keyword status'];\n  const negRows = [];\n  for (const ag of data.splitRecommendation.recommendedAdGroups) {\n    for (const neg of (ag.negativeKeywords || [])) {\n      negRows.push([\n        data.campaignName,\n        ag.name,\n        neg.text,\n        neg.matchType === 'EXACT' ? 'Exact' : neg.matchType === 'PHRASE' ? 'Phrase' : 'Broad',\n        'Enabled'\n      ]);\n    }\n  }\n  if (negRows.length > 0) {\n    negativesCsv = '\\uFEFF' + negHeaders.map(csvEscape).join(',') + '\\n' + negRows.map(r => r.map(csvEscape).join(',')).join('\\n');\n  }\n}\n\nreturn [{\n  json: {\n    // Final summary\n    status: 'completed',\n    adGroupName: data.adGroupName,\n    campaignName: data.campaignName,\n    headlineTestPassed: data.headlineTest?.passes,\n    intentAligned: data.intentClassification?.copyMatchesIntent,\n    dominantIntent: data.intentClassification?.dominantIntent,\n    headlinesGenerated: headlines.length,\n    descriptionsGenerated: descriptions.length,\n    warnings: data.allWarnings || [],\n    // Full outputs\n    report: data.report,\n    rsaCsv,\n    negativesCsv: negativesCsv || null,\n    // Structured data\n    headlineTest: data.headlineTest,\n    intentClassification: data.intentClassification,\n    splitRecommendation: data.splitRecommendation,\n    queryPromotions: data.queryPromotions,\n    generatedHeadlines: data.generatedHeadlines,\n    generatedDescriptions: data.generatedDescriptions\n  }\n}];"
+      },
+      "id": "a1000000-0000-0000-0000-000000000120",
+      "name": "Build CSV + Final Output",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [4000, 180]
+    }
+  ],
+  "connections": {
+    "Webhook Trigger": {
+      "main": [
+        [
+          {
+            "node": "Set Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Weekly Schedule": {
+      "main": [
+        [
+          {
+            "node": "Set Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set Config": {
+      "main": [
+        [
+          {
+            "node": "Fetch Keywords",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Fetch RSA Ads",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Fetch Search Terms",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Keywords": {
+      "main": [
+        [
+          {
+            "node": "Group by Ad Group",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch RSA Ads": {
+      "main": [
+        [
+          {
+            "node": "Group by Ad Group",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Search Terms": {
+      "main": [
+        [
+          {
+            "node": "Group by Ad Group",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Group by Ad Group": {
+      "main": [
+        [
+          {
+            "node": "Phase 1.1 - Headline Test",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Phase 1.2 - Intent Classification",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Phase 1.1 - Headline Test": {
+      "main": [
+        [
+          {
+            "node": "Compile Phase 1 Results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Phase 1.2 - Intent Classification": {
+      "main": [
+        [
+          {
+            "node": "Compile Phase 1 Results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Compile Phase 1 Results": {
+      "main": [
+        [
+          {
+            "node": "Needs Structure Fix?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Needs Structure Fix?": {
+      "main": [
+        [
+          {
+            "node": "Phase 2.1 - Split Recommendation",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Phase 2.2 - Query Promotion",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Skip Phase 2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Phase 2.1 - Split Recommendation": {
+      "main": [
+        [
+          {
+            "node": "Compile Phase 2 Results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Phase 2.2 - Query Promotion": {
+      "main": [
+        [
+          {
+            "node": "Compile Phase 2 Results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Compile Phase 2 Results": {
+      "main": [
+        [
+          {
+            "node": "Merge Phase 2 Paths",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Skip Phase 2": {
+      "main": [
+        [
+          {
+            "node": "Merge Phase 2 Paths",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Merge Phase 2 Paths": {
+      "main": [
+        [
+          {
+            "node": "Phase 3.1 - Generate Headlines",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Phase 3.1 - Generate Headlines": {
+      "main": [
+        [
+          {
+            "node": "Validate Headlines",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate Headlines": {
+      "main": [
+        [
+          {
+            "node": "Phase 3.2 - Generate Descriptions",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Phase 3.2 - Generate Descriptions": {
+      "main": [
+        [
+          {
+            "node": "Validate Descriptions",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate Descriptions": {
+      "main": [
+        [
+          {
+            "node": "Build Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Report": {
+      "main": [
+        [
+          {
+            "node": "Build CSV + Final Output",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {}
+}

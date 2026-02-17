@@ -1,0 +1,164 @@
+{
+  "name": "Ad Relevance SOP - Phase 1: Diagnose",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "trigger",
+      "name": "Execute Workflow Trigger",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1,
+      "position": [0, 0]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://googleads.googleapis.com/v18/customers/{{ $json.customerId }}/googleAds:searchStream",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleAdsOAuth2Api",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "developer-token", "value": "={{ $json.developerToken }}" },
+            { "name": "login-customer-id", "value": "={{ $json.loginCustomerId }}" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ query: \"SELECT ad_group.id, ad_group.name, campaign.id, campaign.name, ad_group_criterion.keyword.text, ad_group_criterion.keyword.match_type, metrics.impressions, metrics.clicks, metrics.conversions, metrics.cost_micros, metrics.average_cpc FROM keyword_view WHERE campaign.status = 'ENABLED' AND ad_group.status = 'ENABLED' AND ad_group_criterion.status = 'ENABLED' AND segments.date DURING \" + $json.dateRange + \" ORDER BY metrics.impressions DESC\" }) }}"
+      },
+      "id": "fetch-keywords",
+      "name": "Fetch Keywords",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [250, -100]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://googleads.googleapis.com/v18/customers/{{ $json.customerId }}/googleAds:searchStream",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleAdsOAuth2Api",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "developer-token", "value": "={{ $json.developerToken }}" },
+            { "name": "login-customer-id", "value": "={{ $json.loginCustomerId }}" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ query: \"SELECT ad_group.id, ad_group.name, ad_group_ad.ad.id, ad_group_ad.ad.responsive_search_ad.headlines, ad_group_ad.ad.responsive_search_ad.descriptions, ad_group_ad.status, ad_group_ad.ad.final_urls FROM ad_group_ad WHERE ad_group_ad.ad.type = 'RESPONSIVE_SEARCH_AD' AND campaign.status = 'ENABLED' AND ad_group.status = 'ENABLED'\" }) }}"
+      },
+      "id": "fetch-rsa-ads",
+      "name": "Fetch RSA Ads",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [250, 100]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Merge keywords and RSA data, group by ad group\nconst keywordData = $('Fetch Keywords').first().json;\nconst rsaData = $('Fetch RSA Ads').first().json;\n\nconst keywordRows = (Array.isArray(keywordData) ? keywordData : [keywordData])\n  .flatMap(batch => batch.results || []);\nconst rsaRows = (Array.isArray(rsaData) ? rsaData : [rsaData])\n  .flatMap(batch => batch.results || []);\n\n// Group by ad group ID\nconst adGroups = new Map();\n\nfor (const row of keywordRows) {\n  const agId = row.adGroup.id;\n  if (!adGroups.has(agId)) {\n    adGroups.set(agId, {\n      adGroupId: agId,\n      adGroupName: row.adGroup.name,\n      campaignId: row.campaign.id,\n      campaignName: row.campaign.name,\n      keywords: [],\n      rsaAds: []\n    });\n  }\n  adGroups.get(agId).keywords.push({\n    text: row.adGroupCriterion.keyword.text,\n    matchType: row.adGroupCriterion.keyword.matchType,\n    impressions: Number(row.metrics.impressions),\n    clicks: Number(row.metrics.clicks),\n    conversions: Number(row.metrics.conversions)\n  });\n}\n\nfor (const row of rsaRows) {\n  const agId = row.adGroup.id;\n  if (adGroups.has(agId)) {\n    adGroups.get(agId).rsaAds.push({\n      headlines: (row.adGroupAd.ad.responsiveSearchAd?.headlines || []).map(h => h.text),\n      descriptions: (row.adGroupAd.ad.responsiveSearchAd?.descriptions || []).map(d => d.text),\n      finalUrls: row.adGroupAd.ad.finalUrls || []\n    });\n  }\n}\n\nreturn Array.from(adGroups.values()).map(ag => ({ json: ag }));"
+      },
+      "id": "merge-data",
+      "name": "Group by Ad Group",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [500, 0]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.anthropic.com/v1/messages",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "x-api-key", "value": "={{ $env.ANTHROPIC_API_KEY }}" },
+            { "name": "anthropic-version", "value": "2023-06-01" },
+            { "name": "content-type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ model: 'claude-sonnet-4-5-20250929', max_tokens: 2048, messages: [{ role: 'user', content: 'You are a Google Ads specialist performing the Headline Test.\\n\\nAd Group: \"' + $json.adGroupName + '\"\\n\\nKeywords (sorted by impressions):\\n' + $json.keywords.map(k => '- \"' + k.text + '\" (' + k.matchType + ', ' + k.impressions + ' imp)').join('\\n') + '\\n\\nDetermine if a SINGLE headline (max 30 chars) could address ALL these keywords. If keywords span multiple intents, the test FAILS. Return JSON only: { \"passes\": boolean, \"suggestedHeadline\": string|null, \"intentClusters\": [{ \"clusterName\": string, \"theme\": string, \"keywords\": string[], \"suggestedHeadline\": string }], \"reasoning\": string }' }] }) }}"
+      },
+      "id": "headline-test",
+      "name": "Headline Test (Claude)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [750, -100]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.anthropic.com/v1/messages",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "x-api-key", "value": "={{ $env.ANTHROPIC_API_KEY }}" },
+            { "name": "anthropic-version", "value": "2023-06-01" },
+            { "name": "content-type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ model: 'claude-sonnet-4-5-20250929', max_tokens: 2048, messages: [{ role: 'user', content: 'Classify each keyword by search intent.\\n\\nAd Group: \"' + $json.adGroupName + '\"\\n\\nKeywords:\\n' + $json.keywords.map(k => '- \"' + k.text + '\"').join('\\n') + '\\n\\nCurrent headlines:\\n' + ($json.rsaAds[0]?.headlines || ['(none)']).map(h => '- \"' + h + '\"').join('\\n') + '\\n\\nCurrent descriptions:\\n' + ($json.rsaAds[0]?.descriptions || ['(none)']).map(d => '- \"' + d + '\"').join('\\n') + '\\n\\nClassify as INFORMATIONAL/COMMERCIAL/TRANSACTIONAL. Check if copy matches intent. Return JSON: { \"dominantIntent\": string, \"copyMatchesIntent\": boolean, \"mismatchDetails\": string|null, \"recommendedCopyDirection\": string }' }] }) }}"
+      },
+      "id": "intent-classify",
+      "name": "Intent Classification (Claude)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [750, 100]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse Claude API responses and compile diagnosis\nconst headlineTestRaw = $('Headline Test (Claude)').first().json;\nconst intentClassifyRaw = $('Intent Classification (Claude)').first().json;\nconst adGroup = $('Group by Ad Group').first().json;\n\nfunction parseClaudeResponse(response) {\n  const text = response.content?.[0]?.text || '';\n  const match = text.match(/```(?:json)?\\s*([\\s\\S]*?)```/);\n  return JSON.parse(match ? match[1].trim() : text.trim());\n}\n\nconst headlineTest = parseClaudeResponse(headlineTestRaw);\nconst intentClassify = parseClaudeResponse(intentClassifyRaw);\n\nreturn [{\n  json: {\n    adGroupId: adGroup.adGroupId,\n    adGroupName: adGroup.adGroupName,\n    campaignName: adGroup.campaignName,\n    keywordCount: adGroup.keywords.length,\n    totalImpressions: adGroup.keywords.reduce((sum, k) => sum + k.impressions, 0),\n    headlineTest,\n    intentClassification: intentClassify,\n    needsSplit: !headlineTest.passes,\n    needsCopyFix: !intentClassify.copyMatchesIntent || true,\n    keywords: adGroup.keywords,\n    rsaAds: adGroup.rsaAds\n  }\n}];"
+      },
+      "id": "compile-diagnosis",
+      "name": "Compile Diagnosis",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1000, 0]
+    }
+  ],
+  "connections": {
+    "Execute Workflow Trigger": {
+      "main": [
+        [
+          { "node": "Fetch Keywords", "type": "main", "index": 0 },
+          { "node": "Fetch RSA Ads", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Fetch Keywords": {
+      "main": [
+        [{ "node": "Group by Ad Group", "type": "main", "index": 0 }]
+      ]
+    },
+    "Fetch RSA Ads": {
+      "main": [
+        [{ "node": "Group by Ad Group", "type": "main", "index": 0 }]
+      ]
+    },
+    "Group by Ad Group": {
+      "main": [
+        [
+          { "node": "Headline Test (Claude)", "type": "main", "index": 0 },
+          { "node": "Intent Classification (Claude)", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Headline Test (Claude)": {
+      "main": [
+        [{ "node": "Compile Diagnosis", "type": "main", "index": 0 }]
+      ]
+    },
+    "Intent Classification (Claude)": {
+      "main": [
+        [{ "node": "Compile Diagnosis", "type": "main", "index": 0 }]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}
